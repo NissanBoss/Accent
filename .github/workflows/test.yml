@@ -1,0 +1,104 @@
+name: Test
+
+# All three systems for the code, and on Linux the binary itself, end to
+# end, on two projects made up in the job: one with a name on it, one
+# without, sharing what people really do share.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+
+      - name: Formatting
+        shell: bash
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Tests
+        run: go test -v ./...
+
+      - name: The other systems still compile
+        shell: bash
+        run: |
+          for target in windows linux darwin; do
+            GOOS=$target go vet .
+            GOOS=$target go build -o /dev/null .
+          done
+
+  # The binary on two projects: the exit code, the masking the README
+  # promises, and a secret that must not come out even with --reveal.
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+
+      - name: Two projects by one person
+        run: |
+          go build -o accent-check .
+          mkdir -p named anonymous
+          printf 'MIT License\n\nCopyright (c) 2026 Jane Rook\n' > named/LICENSE
+          printf 'module github.com/janerook/retry\n\ngo 1.22\n' > named/go.mod
+          printf 'module github.com/quietfox/fetcher\n\ngo 1.22\n' > anonymous/go.mod
+          for d in named anonymous; do
+            {
+              echo "package main"
+              echo
+              echo "// Servers send Retry-After in seconds or as an HTTP date, and a few"
+              echo "// send both in one header, which no parser in the library expects."
+              echo "const contact = \"rook@fastmail.com\""
+              echo "const dsn = \"postgres://app:hunter2-correct-staple@db.internal/app\""
+            } > $d/main.go
+          done
+          set +e
+          ./accent-check named anonymous > masked.txt
+          code=$?
+          set -e
+          cat masked.txt
+          if [ "$code" -ne 1 ]; then
+            echo "a shared address should exit 1, and the exit code was $code"
+            exit 1
+          fi
+          for name in rook@fastmail Retry-After; do
+            if grep -q "$name" masked.txt; then
+              echo "the masked report printed $name"
+              exit 1
+            fi
+          done
+          ./accent-check --reveal named anonymous > revealed.txt || true
+          grep -q "rook@fastmail.com" revealed.txt || { echo "--reveal did not name the address"; exit 1; }
+          if grep -q "hunter2-correct-staple" masked.txt revealed.txt; then
+            echo "a secret reached the report"
+            exit 1
+          fi
+
+      - name: Nothing to read
+        run: |
+          mkdir -p empty
+          set +e
+          ./accent-check empty > /dev/null
+          code=$?
+          set -e
+          [ "$code" -eq 3 ] || { echo "an empty folder should exit 3, got $code"; exit 1; }

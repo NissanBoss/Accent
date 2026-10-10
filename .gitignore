@@ -1,0 +1,9 @@
+accent
+accent.exe
+accent-check
+accent-check.exe
+dist/
+
+*.test
+*.test.exe
+*.out

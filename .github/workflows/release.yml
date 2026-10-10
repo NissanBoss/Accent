@@ -1,0 +1,86 @@
+name: Release
+
+# Tagging a version (git tag v1) builds the five packages and puts them on
+# the Releases page.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+
+      # build.sh is the same script used to build by hand, called rather
+      # than copied. It already checks formatting, runs vet and runs the
+      # tests before compiling anything, so none of that is repeated here.
+      # GITHUB_REF_NAME is the tag, and it is what "accent --version"
+      # ends up printing.
+      - name: Build the packages
+        run: |
+          sh build.sh
+          ls -lh dist/*.zip dist/*.tar.gz
+
+      # The release text comes from CHANGELOG.md, from the section whose
+      # heading matches this tag exactly. No section, no notes: better than
+      # the same generic paragraph on every version.
+      - name: Prepare the release notes
+        run: |
+          if [ -f CHANGELOG.md ]; then
+            awk -v wanted="## $GITHUB_REF_NAME" '
+              $0 == wanted { inside = 1; next }
+              /^## / { inside = 0 }
+              inside { print }
+            ' CHANGELOG.md > notes.md
+          fi
+          touch notes.md
+          cat >> notes.md <<'END'
+
+          ## Download
+
+          Take the package for your system, unpack it, and run the binary.
+          There is nothing to install.
+
+          | System | Package |
+          |---|---|
+          | Windows | `accent-windows.zip` |
+          | Linux | `accent-linux.tar.gz` |
+          | Linux on ARM | `accent-linux-arm.tar.gz` |
+          | Mac with Apple silicon | `accent-mac-apple.tar.gz` |
+          | Mac with Intel | `accent-mac-intel.tar.gz` |
+
+          Point it at two folders of code: the project with your name
+          on it, and the one without. It says what ties them together:
+          the names, accounts and IDs both carry, the lines and comments
+          both have that nobody else does, the libraries few others use,
+          and the rare words both reach for, set against what two
+          strangers share. Point it at one folder and it says what in it
+          names you and what sets your style apart.
+
+          It only reads, nothing is sent anywhere, and there is no model
+          in it.
+          END
+          echo "--- notes ---"
+          cat notes.md
+
+      - name: Publish
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            dist/accent-windows.zip
+            dist/accent-linux.tar.gz
+            dist/accent-linux-arm.tar.gz
+            dist/accent-mac-apple.tar.gz
+            dist/accent-mac-intel.tar.gz
+          body_path: notes.md
